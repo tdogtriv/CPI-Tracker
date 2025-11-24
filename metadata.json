@@ -1,0 +1,5 @@
+{
+  "name": "Bolivia CPI Tracker",
+  "description": "A live inflation tracker for Bolivia analyzing supermarket prices from GitHub data, featuring CPI calculation and AI-powered market analysis.",
+  "requestFramePermissions": []
+}
