@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Header } from './components/Header';
 import { StatsCards } from './components/StatsCards';
 import { Charts } from './components/Charts';
-import { AIAnalysis } from './components/AIAnalysis';
 import { CPIData, CITIES, CityConfig, CPIPoint, CATEGORY_MAPPING, CATEGORY_WEIGHTS } from './types';
 import { fetchDirectoryListing, fetchRawCSV, selectFilesToProcess, fetchFileContent } from './services/githubService';
 import { parseCSV, calculateSingleCityCPI, aggregateNationalCPI, parseProductMap } from './utils/csvParser';
@@ -222,8 +221,7 @@ const App: React.FC = () => {
           <div className="animate-fade-in space-y-2">
             <StatsCards data={data} />
             <Charts data={data} />
-            <AIAnalysis data={data} />
-
+            
             <div className="mt-12 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
                  <Info size={18} className="text-slate-500" />
