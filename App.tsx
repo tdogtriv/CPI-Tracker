@@ -3,8 +3,8 @@ import { Header } from './components/Header';
 import { StatsCards } from './components/StatsCards';
 import { Charts } from './components/Charts';
 import { CPIData, CITIES, CityConfig, CPIPoint, CATEGORY_MAPPING, CATEGORY_WEIGHTS } from './types';
-import { fetchDirectoryListing, fetchRawCSV, selectFilesToProcess, fetchFileContent } from './services/githubService';
-import { parseCSV, calculateSingleCityCPI, aggregateNationalCPI, parseProductMap } from './utils/csvParser';
+import { fetchDirectoryListing, fetchRawCSV, selectFilesToProcess, fetchFileContent, fetchUSDTData } from './services/githubService';
+import { parseCSV, calculateSingleCityCPI, aggregateNationalCPI, parseProductMap, parseExchangeRateCSV } from './utils/csvParser';
 import { Loader2, AlertTriangle, Info } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -16,18 +16,24 @@ const App: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        setProgress("Loading product catalog...");
-        // 1. Fetch Product Map with multiple potential paths
-        let mapContent = await fetchFileContent('data/hipermaxi/productos.csv');
-        if (!mapContent) mapContent = await fetchFileContent('data/productos.csv');
-        if (!mapContent) mapContent = await fetchFileContent('productos.csv');
+        setProgress("Loading product catalog & exchange rates...");
         
-        const productMap = mapContent ? parseProductMap(mapContent) : null;
-        if (!productMap) {
-            console.warn("Could not load productos.csv. Categories will be inferred from raw files if possible.");
-        } else {
+        // Parallel Fetch: Product Map and USDT Exchange Rate
+        const [mapContent1, mapContent2, mapContent3, usdtContent] = await Promise.all([
+             fetchFileContent('data/hipermaxi/productos.csv'),
+             fetchFileContent('data/productos.csv'),
+             fetchFileContent('productos.csv'),
+             fetchUSDTData()
+        ]);
+
+        let productMapContent = mapContent1 || mapContent2 || mapContent3;
+        const productMap = productMapContent ? parseProductMap(productMapContent) : null;
+        if (productMap) {
             console.log("Loaded product map: " + Object.keys(productMap).length + " items.");
         }
+
+        const usdtRates = usdtContent ? parseExchangeRateCSV(usdtContent) : {};
+        console.log(`Loaded ${Object.keys(usdtRates).length} daily exchange rate points.`);
 
         // 2. Process each city
         const cityResults: { cityId: string, points: CPIPoint[] }[] = [];
@@ -84,6 +90,12 @@ const App: React.FC = () => {
         setProgress("Aggregating National CPI...");
         const nationalData = aggregateNationalCPI(cityResults, CITIES);
         
+        // Merge USDT data into national points
+        nationalData.points = nationalData.points.map(p => ({
+            ...p,
+            usdtRate: usdtRates[p.date] || undefined
+        }));
+
         setData(nationalData);
       } catch (err: any) {
         console.error(err);
@@ -99,13 +111,14 @@ const App: React.FC = () => {
   const downloadCSV = () => {
     if (!data) return;
     
-    const headers = ['Date', 'National CPI', 'Inflation MoM%', 'Cochabamba', 'La Paz', 'Santa Cruz'];
+    const headers = ['Date', 'National CPI', 'Inflation MoM%', 'USDT Rate (Bs)', 'Cochabamba', 'La Paz', 'Santa Cruz'];
     const rows = data.points.map(p => {
       const cityVals = CITIES.map(c => p.cityBreakdown?.[c.name]?.toFixed(2) || '');
       return [
         p.date,
         p.cpi.toFixed(2),
         p.inflation.toFixed(2),
+        p.usdtRate?.toFixed(2) || '',
         ...cityVals
       ].join(',');
     });
@@ -126,11 +139,17 @@ const App: React.FC = () => {
     lines.push("BOLIVIA CPI TRACKER - METHODOLOGY & DATA STRUCTURE");
     lines.push("=================================================");
     lines.push("");
-    lines.push("1. DATA SOURCE");
+    lines.push("1. DATA SOURCES");
     lines.push("--------------");
-    lines.push("This tracker uses daily scraping data from Hipermaxi supermarkets in three cities:");
-    CITIES.forEach(c => lines.push(`- ${c.name} (Source: ${c.path})`));
-    lines.push("Repository: https://github.com/mauforonda/precios");
+    lines.push("A. Supermarket Prices:");
+    lines.push("   Daily scraping data from Hipermaxi supermarkets in three cities:");
+    CITIES.forEach(c => lines.push(`   - ${c.name} (Source: ${c.path})`));
+    lines.push("   Repository: https://github.com/mauforonda/precios");
+    lines.push("");
+    lines.push("B. Exchange Rate:");
+    lines.push("   Daily Parallel/USDT Buy Rate (Bolivianos).");
+    lines.push("   Repository: https://github.com/mauforonda/dolares (File: buy.csv)");
+    lines.push("   Method: Median of daily reported buy rates.");
     lines.push("");
     
     lines.push("2. CALCULATION PIPELINE");
@@ -204,10 +223,7 @@ const App: React.FC = () => {
             </div>
             <h2 className="text-xl font-bold text-slate-800">Unable to Load Data</h2>
             <p className="text-slate-500 mt-2 max-w-lg mx-auto">{error}</p>
-            <p className="text-xs text-slate-400 mt-4">
-                Note: This app relies on the live GitHub repository 'mauforonda/precios'. 
-                GitHub API rate limits may apply.
-            </p>
+            <p className="text-slate-500 mt-2 text-sm italic">{error.includes('fetch') ? 'GitHub API limits might be reached.' : ''}</p>
             <button 
               onClick={() => window.location.reload()}
               className="mt-6 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition"
@@ -229,35 +245,35 @@ const App: React.FC = () => {
               </div>
               <div className="p-6 text-sm text-slate-600 space-y-4 leading-relaxed">
                 <p>
-                  This live tracker processes daily scraping data from <strong>Hipermaxi supermarkets</strong> across Bolivia's three main metropolitan areas: Santa Cruz, La Paz, and Cochabamba. The Consumer Price Index (CPI) is constructed using a rigorous four-step pipeline designed to filter noise and align with official statistical standards.
+                  This live tracker processes daily scraping data from <strong>Hipermaxi supermarkets</strong> across Bolivia's three main metropolitan areas. The Consumer Price Index (CPI) is constructed using a rigorous four-step pipeline designed to filter noise and align with official statistical standards.
                 </p>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
                   <div>
                     <h4 className="font-bold text-slate-800 mb-2">1. Mapping & Categorization</h4>
                     <p className="text-slate-500">
-                      Raw product data is cleaned and mapped to official government CPI categories (e.g., <em>Alimentos y Bebidas</em>, <em>Recreación y Cultura</em>) using a comprehensive product dictionary. Unmapped items are excluded to ensure consistency.
+                      Raw product data is cleaned and mapped to official government CPI categories (e.g., <em>Alimentos y Bebidas</em>) using a product dictionary. Unmapped items are excluded.
                     </p>
                   </div>
                   
                   <div>
                     <h4 className="font-bold text-slate-800 mb-2">2. Geometric Mean Aggregation</h4>
                     <p className="text-slate-500">
-                       To handle price volatility and outliers, we calculate the <strong>Geometric Mean</strong> of prices within each category for every day. This prevents single expensive items from skewing the category average.
+                       We calculate the <strong>Geometric Mean</strong> of prices within each category daily. This statistical method reduces the impact of extreme price outliers.
                     </p>
                   </div>
 
                   <div>
-                    <h4 className="font-bold text-slate-800 mb-2">3. Weighted Basket Construction</h4>
+                    <h4 className="font-bold text-slate-800 mb-2">3. Weighted Basket</h4>
                     <p className="text-slate-500">
-                      Official weights are applied to the category averages to create a synthetic "Basket Price" for each city. The weights are: <em>Alimentos y Bebidas (57.7%)</em>, <em>Bienes Diversos (16.1%)</em>, <em>Recreación (13.2%)</em>, and <em>Muebles (13.0%)</em>.
+                      Official weights are applied to category averages to create a synthetic "Basket Price". Weights: <em>Alimentos (57.7%)</em>, <em>Bienes Diversos (16.1%)</em>, <em>Recreación (13.2%)</em>, <em>Muebles (13.0%)</em>.
                     </p>
                   </div>
 
                   <div>
-                    <h4 className="font-bold text-slate-800 mb-2">4. National Composite Index</h4>
+                    <h4 className="font-bold text-slate-800 mb-2">4. Composite Index & Exchange Rate</h4>
                     <p className="text-slate-500">
-                      The final National CPI is a weighted average of the three city indices based on their economic weight: <strong>Santa Cruz (41.5%)</strong>, <strong>La Paz (39.1%)</strong>, and <strong>Cochabamba (19.4%)</strong>.
+                      The National CPI is a weighted average of: <strong>Santa Cruz (41.5%)</strong>, <strong>La Paz (39.1%)</strong>, and <strong>Cochabamba (19.4%)</strong>. Exchange rate data is sourced from median daily USDT buy rates (Source: <em>mauforonda/dolares</em>).
                     </p>
                   </div>
                 </div>

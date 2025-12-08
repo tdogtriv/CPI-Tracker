@@ -185,6 +185,86 @@ export function parseCSV(content: string, filenameDate: string, productMap: Reco
     return products;
 }
 
+export function parseExchangeRateCSV(content: string): Record<string, number> {
+    const delimiter = detectDelimiter(content);
+    const lines = content.split('\n').filter(l => l.trim().length > 0);
+    const dailyRates: Record<string, number[]> = {};
+
+    // Standard column detection
+    if (lines.length < 2) return {};
+    const headers = parseCSVLine(lines[0], delimiter).map(h => h.toLowerCase().trim());
+    
+    // Look for standard date/price columns with expanded synonyms
+    const dateIdx = headers.findIndex(h => h.includes('fecha') || h.includes('date') || h.includes('created') || h.includes('time') || h.includes('timestamp'));
+    const priceIdx = headers.findIndex(h => h.includes('valor') || h.includes('price') || h.includes('buy') || h.includes('compra') || h.includes('oficial') || h.includes('median'));
+
+    if (dateIdx === -1 || priceIdx === -1) {
+        console.warn("Could not identify columns in exchange rate CSV. Headers:", headers);
+        return {};
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+        const cols = parseCSVLine(lines[i], delimiter);
+        if (cols.length <= Math.max(dateIdx, priceIdx)) continue;
+
+        let dateStr = cols[dateIdx];
+        if (!dateStr) continue;
+
+        // Remove quotes if present
+        dateStr = dateStr.replace(/['"]/g, '').trim();
+
+        // Check for Unix Timestamp (numeric string)
+        if (/^\d+$/.test(dateStr)) {
+            const num = parseInt(dateStr, 10);
+            // Year 2000 in seconds is 946684800. Filter out small numbers/garbage
+            if (num > 946684800) {
+                 // Detect seconds vs milliseconds (10 digits vs 13 digits)
+                 const dateObj = new Date(num > 10000000000 ? num : num * 1000);
+                 if (!isNaN(dateObj.getTime())) {
+                     dateStr = dateObj.toISOString().split('T')[0];
+                 }
+            }
+        } else {
+            // Normalize date to YYYY-MM-DD
+            // Handle ISO with time: "2024-01-01T10:00:00" -> "2024-01-01"
+            if (dateStr.includes('T')) {
+                dateStr = dateStr.split('T')[0];
+            } else if (dateStr.includes(' ')) {
+                // Handle space separator: "2024-01-01 10:00" -> "2024-01-01"
+                dateStr = dateStr.split(' ')[0];
+            }
+
+            // Handle Slash formats if encountered (e.g., DD/MM/YYYY)
+            if (dateStr.includes('/') && dateStr.split('/').length === 3) {
+                const parts = dateStr.split('/');
+                if (parts[2].length === 4) {
+                     // assume DD/MM/YYYY -> YYYY-MM-DD
+                     dateStr = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                }
+            }
+        }
+        
+        const price = parsePrice(cols[priceIdx]);
+        
+        // Basic sanity check for exchange rate (0-100 range)
+        if (dateStr && price > 0 && price < 100) {
+             if (!dailyRates[dateStr]) dailyRates[dateStr] = [];
+             dailyRates[dateStr].push(price);
+        }
+    }
+
+    // Calculate median per day
+    const result: Record<string, number> = {};
+    Object.entries(dailyRates).forEach(([date, rates]) => {
+        rates.sort((a, b) => a - b);
+        const mid = Math.floor(rates.length / 2);
+        const median = rates.length % 2 !== 0 ? rates[mid] : (rates[mid - 1] + rates[mid]) / 2;
+        result[date] = median;
+    });
+
+    return result;
+}
+
 interface DailyCategoryStats {
     date: string;
     // Stores Geometric Mean of prices for the category

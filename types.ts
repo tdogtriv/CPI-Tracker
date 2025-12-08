@@ -36,6 +36,7 @@ export interface CPIPoint {
   inflation: number; // Month-over-month
   details: Record<string, number>; // Price index per Gov Category
   cityBreakdown?: Record<string, number>; // CPI per city for this date
+  usdtRate?: number; // Daily Median USDT Exchange Rate
 }
 
 export interface CPIData {

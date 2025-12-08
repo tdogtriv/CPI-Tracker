@@ -49,6 +49,32 @@ export async function fetchRawCSV(url: string): Promise<string> {
   return await response.text();
 }
 
+export async function fetchUSDTData(): Promise<string | null> {
+    // Try multiple potential paths for the dataset to ensure robustness
+    const urls = [
+        'https://raw.githubusercontent.com/mauforonda/dolares/main/data/buy.csv',
+        'https://raw.githubusercontent.com/mauforonda/dolares/master/data/buy.csv',
+        'https://raw.githubusercontent.com/mauforonda/dolares/main/buy.csv'
+    ];
+
+    for (const url of urls) {
+        try {
+            const response = await fetch(url);
+            if (response.ok) {
+                const text = await response.text();
+                // Basic validation to ensure we didn't get a 200 OK HTML page
+                if (text.length > 20 && !text.trim().startsWith('<')) {
+                    return text;
+                }
+            }
+        } catch (error) {
+            console.warn(`Failed to fetch USDT data from ${url}`, error);
+        }
+    }
+    console.error("All USDT data fetch attempts failed");
+    return null;
+}
+
 /**
  * Selects a sampling of files to avoid fetching hundreds of daily files.
  * Strategy: 

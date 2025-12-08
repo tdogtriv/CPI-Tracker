@@ -1,5 +1,5 @@
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine, ComposedChart } from 'recharts';
 import { CPIData } from '../types';
 
 interface ChartsProps {
@@ -19,6 +19,15 @@ export const Charts: React.FC<ChartsProps> = ({ data }) => {
       }
       return item;
   });
+
+  // Filter data for the correlation chart to ensure we have valid points
+  const correlationData = data.points
+    .filter(p => p.cpi > 0 && p.usdtRate && p.usdtRate > 0)
+    .map(p => ({
+        date: p.date,
+        cpi: parseFloat(p.cpi.toFixed(2)),
+        usdt: parseFloat((p.usdtRate || 0).toFixed(2))
+    }));
 
   // Generate YoY Data Series
   const yoyData = data.points.map(point => {
@@ -70,9 +79,11 @@ export const Charts: React.FC<ChartsProps> = ({ data }) => {
              </div>
           )}
           {payload.map((p: any) => (
-            <p key={p.name} className="text-xs" style={{ color: p.color }}>
-              {p.name}: <span className="font-semibold">{p.value}</span>
+            <p key={p.dataKey || p.name} className="text-xs flex items-center gap-2" style={{ color: p.color }}>
+              <span>{p.name}:</span>
+              <span className="font-semibold">{p.value}</span>
               {p.name.includes('Inflation') && '%'}
+              {p.name.includes('USDT') && ' Bs'}
             </p>
           ))}
         </div>
@@ -213,6 +224,68 @@ export const Charts: React.FC<ChartsProps> = ({ data }) => {
                 Calculated by comparing daily CPI to the closest available data point from ~1 year ago.
             </p>
         </div>
+      )}
+
+      {/* Correlation Chart: CPI vs USDT */}
+      {correlationData.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div className="mb-6">
+                <h3 className="text-lg font-bold text-slate-900">Economic Correlation: CPI vs Parallel Dollar</h3>
+                <p className="text-sm text-slate-500">Comparison of the National Price Index against the USDT/Boliviano parallel exchange rate.</p>
+            </div>
+            <div className="h-[400px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={correlationData}>
+                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                   <XAxis 
+                      dataKey="date" 
+                      tick={{fontSize: 12, fill: '#64748b'}} 
+                      tickLine={false}
+                      axisLine={false}
+                      minTickGap={30}
+                   />
+                   <YAxis 
+                      yAxisId="left"
+                      domain={['auto', 'auto']} 
+                      tick={{fontSize: 12, fill: '#0f172a'}} 
+                      tickLine={false}
+                      axisLine={false}
+                      label={{ value: 'CPI Index', angle: -90, position: 'insideLeft', fill: '#0f172a', fontSize: 12 }}
+                   />
+                   <YAxis 
+                      yAxisId="right"
+                      orientation="right"
+                      domain={['auto', 'auto']} 
+                      tick={{fontSize: 12, fill: '#16a34a'}} 
+                      tickLine={false}
+                      axisLine={false}
+                      label={{ value: 'USDT Rate (Bs)', angle: 90, position: 'insideRight', fill: '#16a34a', fontSize: 12 }}
+                   />
+                   <Tooltip content={<CustomTooltip />} />
+                   <Legend />
+                   <Line 
+                      yAxisId="left"
+                      type="monotone" 
+                      dataKey="cpi" 
+                      name="National CPI" 
+                      stroke="#0f172a" 
+                      strokeWidth={3} 
+                      dot={false} 
+                    />
+                   <Line 
+                      yAxisId="right"
+                      type="monotone" 
+                      dataKey="usdt" 
+                      name="USDT Rate (Bs)" 
+                      stroke="#16a34a" 
+                      strokeWidth={2} 
+                      dot={false} 
+                      strokeDasharray="4 4"
+                    />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
       )}
     </div>
   );
